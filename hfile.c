@@ -18,9 +18,10 @@
 #define MFIELD 10
 #define REGISTERS 100
 
-void buildHeader() {
+void buildStandardHeader() {
 	char fname[15], ftype;
-	int flen, count, ffalse = 0;
+	int flen, count;
+	bool ffalse = false;
 	FILE *f;
 	f = fopen("database", "w+");
 	if (f == NULL) {
@@ -56,13 +57,82 @@ void buildHeader() {
   fwrite(fname, 15 + 1 + sizeof(int), MFIELD - 3, f);
 
 	// Write on file the information about the fields
-	fwrite(&ffalse, sizeof(int), 1, f);
 	for (count = 0; count < REGISTERS; count++) {
 		fwrite(&ffalse, sizeof(bool), 1, f);
-		fwrite(&ffalse, sizeof(int), 1, f);
 	}
 
 	fclose(f);
+}
+
+void buildManualHeader() {
+	char fname[15], ftype, buf[100], c;
+	int flen, count, option;
+	bool ffalse = false;
+	FILE *f;
+	f = fopen("database", "w+");
+	if (f == NULL) {
+		exit(0);
+  }
+
+	for(count = 1; count <= 10; count++) {
+		__fpurge(stdin);
+		printf("\nType the attribute name:");
+		fgets(buf, 15 + 1, stdin);
+		if (buf[strlen(buf) - 1] != '\n') {
+			c = getchar();
+		}	else {
+			buf[strlen(buf) - 1] = 0;
+		}
+		fwrite(buf, 15, 1, f);
+
+		fflush(stdin);
+		printf("\nType the attribute type:");
+		buf[0] = fgetc(stdin);
+		while((c = getchar()) != '\n' && c != EOF); /// garbage collector
+		fwrite(buf, 1, 1, f);
+
+		if (buf[0] == 'C') {
+			flen = 1;
+		} else if (buf[0] == 'I') {
+			flen = sizeof(int);
+		} else if (buf[0] == 'S') {
+			printf("\nType the attribute length:");
+			scanf("%d", &flen);
+		}
+	  fwrite(&flen, sizeof(int), 1, f);
+
+		if (count != 10) {
+			printf("\nWant to continue? (0 - Yes | 1 - No)");
+			scanf("%d", &option);
+			if (option == 1) {
+				break;
+			}
+		}
+	}
+
+	// The other 7 must have the flag #
+  strcpy(fname, "#");
+  fwrite(fname, 15 + 1 + sizeof(int), MFIELD - count, f);
+
+	// Write on file the information about the fields
+	for (count = 0; count < REGISTERS; count++) {
+		fwrite(&ffalse, sizeof(bool), 1, f);
+	}
+
+	fclose(f);
+}
+
+void buildHeader() {
+	int choice;
+
+	printf("\n\nLoad a standanrd header? (0 - Yes | 1 - No)\n");
+	scanf("%d", &choice);
+
+	if (choice == 0) {
+		buildStandardHeader();
+	} else {
+		buildManualHeader();
+	}
 }
 
 struct theader {
@@ -72,8 +142,7 @@ struct theader {
 };
 
 struct tdataset {
-	int entries;
-	int dataset[REGISTERS];
+	bool dataset[REGISTERS];
 };
 
 union tint {
@@ -105,7 +174,7 @@ struct theader *readHeader() {
 struct tdataset *readDataset() {
 	FILE *f;
 	struct tdataset *tds = (struct tdataset*) malloc(sizeof(struct tdataset));
-	int i;
+	int i, hlen;
 
 	f = fopen("database", "r");
 	if (f == NULL) {
@@ -113,7 +182,9 @@ struct tdataset *readDataset() {
 		exit(0);
   }
 
-	fread(&tds->entries, sizeof(int), 1, f);
+	hlen = MFIELD * (15 + 1 + sizeof(int));
+	fseek(f, hlen, SEEK_SET);
+
 	for (i = 0; i < REGISTERS; i++) {
 		fread(&tds->dataset[i], sizeof(bool), 1, f);
 	}
@@ -122,26 +193,54 @@ struct tdataset *readDataset() {
 	return tds;
 }
 
+int getRegisterLenght(struct theader *t){
+	int i, length = 0;
+
+	for (i = 0; i < MFIELD; i++) {
+		if (t[i].name[0] == '#') {
+			break;
+		}
+		length += t[i].len;
+	}
+
+	return length;
+}
+
 void insert() {
   FILE *f;
 	struct theader *t;
 	struct tdataset *tds;
-	int i;
+	int i, registerLength, hlen, count = 0;
 	char opt, buf[100], c;
 	union tint eint;
 
 	t = readHeader();
 	tds = readDataset();
-	f = fopen("database", "w+");
+	registerLength = getRegisterLenght(t);
+
+	f = fopen("database", "rb+");
 	if (f == NULL){
 		printf("File not found\n");
 		exit(0);
   }
-  
+
+	hlen = (MFIELD * (15 + 1 + sizeof(int))) + (REGISTERS * (sizeof(bool)));
+	fseek(f, hlen, SEEK_SET);
+
 	do {
-		i = 0;
-		while (i < 10 && t[i].name[0] != '#') {
-			printf("\n%s :", t[i].name);
+		for (; count < REGISTERS; count++) {
+			if (tds->dataset[count] == false) {
+				tds->dataset[count] = true;
+				fseek(f, hlen, SEEK_SET);
+				printf("\n %d -> %ld", count, ftell(f));
+				break;
+			}
+
+			hlen += registerLength;
+		}
+
+		for (i = 0; i < 10 && t[i].name[0] != '#'; i++) {
+			printf("\n%s: ", t[i].name);
 			switch (t[i].type) {
 				case 'S':
 					__fpurge(stdin);
@@ -168,14 +267,19 @@ void insert() {
 				  fwrite (&eint.vint, t[i].len, 1, f);
 				  break;
 		  }
-
-		  i++;
 	  }
 
-	  printf("Continuar (S/N): ");
+	  printf("Continuar (s/n): ");
 		opt = getchar();
 	  while((c = getchar()) != '\n' && c != EOF); /// garbage collector
 	} while (opt=='S' || opt=='s');
+
+	hlen = (MFIELD * (15 + 1 + sizeof(int)));
+	fseek(f, hlen, SEEK_SET);
+
+	for (count = 0; count < REGISTERS; count++) {
+		fwrite(&tds->dataset[count], sizeof(bool), 1, f);
+	}
 
 	fclose(f);
 }
@@ -184,12 +288,13 @@ void selectAll() {
   FILE *f;
 	struct theader *t;
 	struct tdataset *tds;
-	int hlen, i, j, space;
+	int hlen, registerLength, count, i, j, space;
 	char buf[100];
 	union tint eint;
 
 	t = readHeader();
 	tds = readDataset();
+	registerLength = getRegisterLenght(t);
 
 	f = fopen("database", "r");
 	if (f == NULL) {
@@ -198,60 +303,99 @@ void selectAll() {
   }
 
 	// read record a record
-  i = 0;
-  while (i < 10 && t[i].name[0] != '#') {
+  for (i = 0; i < MFIELD && t[i].name[0] != '#'; i++) {
   	printf("%s ", t[i].name);
     space = t[i].len - strlen(t[i].name);
     for (j = 1; j <= space; j++) {
       printf(" ");
 		}
-
-		i++;
   }
 
 	printf("\n");
 
-	hlen = (MFIELD * (15 + 1 + sizeof(int))) + sizeof(int) + (REGISTERS * (sizeof(bool)));
+	hlen = (MFIELD * (15 + 1 + sizeof(int))) + (REGISTERS * (sizeof(bool)));
 
 	/// skip file's header
   fseek(f, hlen, SEEK_SET);
-  do {
-		i = 0;
-		while (i < 10 && t[i].name[0] != '#') {
-  		if (!fread(buf, t[i].len, 1, f)) break;
-			switch (t[i].type) {
-				case 'S':
-					for (j = 0; j < t[i].len && buf[j] != 0; j++) {
-						printf("%c", buf[j]);
-					}
 
-			    space = t[i].len - j;
-          for (j = 0; j <= space; j++) {
-            printf(" ");
-					}
-				  break;
-				case 'C':
-					printf("%c ", buf[0]);
-				  break;
-				case 'I':
-					for (j = 0; j < t[i].len; j++) {
-						eint.cint[j] = buf[j];
-					}
-					printf("%d",eint.vint);
-					break;
-		  }
+  for (count = 0; count < REGISTERS; count++) {
+		if (tds->dataset[count] == true) {
+			for (i = 0; i < 10 && t[i].name[0] != '#'; i++) {
+			  if (!fread(buf, t[i].len, 1, f)) break;
+				switch (t[i].type) {
+					case 'S':
+						for (j = 0; j < t[i].len && buf[j] != 0; j++) {
+							printf("%c", buf[j]);
+						}
 
-			i++;
-	  }
-		printf("\n");
-  } while (!feof(f));
+					  space = t[i].len - j;
+		        for (j = 0; j <= space; j++) {
+		          printf(" ");
+						}
+						break;
+					case 'C':
+						printf("%c ", buf[0]);
+						break;
+					case 'I':
+						for (j = 0; j < t[i].len; j++) {
+							eint.cint[j] = buf[j];
+						}
+						printf("%d",eint.vint);
+						break;
+				}
+			}
+
+			printf("\n");
+		}
+		hlen += registerLength;
+		fseek(f, hlen, SEEK_SET);
+	}
+}
+
+void deleteRegister() {
+	FILE *f;
+	struct theader *t;
+	struct tdataset *tds;
+	int registerLength, hlen, count, record = 0;
+	char opt, buf[100], c;
+	union tint eint;
+
+	t = readHeader();
+	tds = readDataset();
+	registerLength = getRegisterLenght(t);
+
+	f = fopen("database", "rb+");
+	if (f == NULL){
+		printf("File not found\n");
+		exit(0);
+  }
+
+	while (true) {
+		printf("\nType the number of the record to be deleted:");
+		scanf("%d", &record);
+
+		if (record > 0 && record <= REGISTERS) {
+			break;
+		}
+	}
+
+	tds->dataset[record-1] = false;
+
+	hlen = (MFIELD * (15 + 1 + sizeof(int)));
+	fseek(f, hlen, SEEK_SET);
+
+	for (count = 0; count < REGISTERS; count++) {
+		fwrite(&tds->dataset[count], sizeof(bool), 1, f);
+	}
+
+	fclose(f);
 }
 
 void menu() {
 	printf("\n\n|--------- Here's the menu: -------|");
 	printf("\n1 - Create Database *use only on the first run*");
-	printf("\n2 - Select all records");
-	printf("\n3 - Insert a record");
+	printf("\n2 - Insert data");
+	printf("\n3 - Select all records");
 	printf("\n4 - Delete a record");
 	printf("\n5 - Exit program\n");
 }
@@ -266,21 +410,22 @@ int main() {
 		switch(option) {
 			case 1:
 				buildHeader();
-				printf("\nDatabase created successfully!\n");
+				printf("\n\n\nDatabase created successfully!\n");
 				break;
 
 			case 2:
-				printf("\n------------------------------\n");
-				selectAll();
-				break;
-
-			case 3:
-				printf("\n------------------------------\n");
+				printf("\n\n\n----- Insert Fields: ------\n");
 				insert();
 				break;
 
+			case 3:
+				printf("\n\n\n----- Selecting All: -----\n");
+				selectAll();
+				break;
+
 			case 4:
-				printf("\n------------------------------\n");
+				printf("\n\n\n----- Delete a Register: -------\n");
+				deleteRegister();
 				break;
 
 			case 5:
