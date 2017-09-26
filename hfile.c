@@ -16,12 +16,10 @@
 */
 
 #define MFIELD 10
-#define REGISTERS 100
 
 void buildStandardHeader() {
 	char fname[15], ftype;
-	int flen, count;
-	bool ffalse = false;
+	int flen;
 	FILE *f;
 	f = fopen("database", "w+");
 	if (f == NULL) {
@@ -56,18 +54,12 @@ void buildStandardHeader() {
   strcpy(fname, "#");
   fwrite(fname, 15 + 1 + sizeof(int), MFIELD - 3, f);
 
-	// Write on file the information about the fields
-	for (count = 0; count < REGISTERS; count++) {
-		fwrite(&ffalse, sizeof(bool), 1, f);
-	}
-
 	fclose(f);
 }
 
 void buildManualHeader() {
 	char fname[15], ftype, buf[100], c;
 	int flen, count, option;
-	bool ffalse = false;
 	FILE *f;
 	f = fopen("database", "w+");
 	if (f == NULL) {
@@ -114,25 +106,7 @@ void buildManualHeader() {
   strcpy(fname, "#");
   fwrite(fname, 15 + 1 + sizeof(int), MFIELD - count, f);
 
-	// Write on file the information about the fields
-	for (count = 0; count < REGISTERS; count++) {
-		fwrite(&ffalse, sizeof(bool), 1, f);
-	}
-
 	fclose(f);
-}
-
-void buildHeader() {
-	int choice;
-
-	printf("\n\nLoad a standanrd header? (0 - Yes | 1 - No)\n");
-	scanf("%d", &choice);
-
-	if (choice == 0) {
-		buildStandardHeader();
-	} else {
-		buildManualHeader();
-	}
 }
 
 struct theader {
@@ -142,7 +116,8 @@ struct theader {
 };
 
 struct tdataset {
-	bool dataset[REGISTERS];
+	int datasetSize;
+	bool dataset[];
 };
 
 union tint {
@@ -173,8 +148,8 @@ struct theader *readHeader() {
 
 struct tdataset *readDataset() {
 	FILE *f;
-	struct tdataset *tds = (struct tdataset*) malloc(sizeof(struct tdataset));
-	int i, hlen;
+	struct tdataset *tds;
+	int i, hlen, datasetSize;
 
 	f = fopen("database", "r");
 	if (f == NULL) {
@@ -185,7 +160,11 @@ struct tdataset *readDataset() {
 	hlen = MFIELD * (15 + 1 + sizeof(int));
 	fseek(f, hlen, SEEK_SET);
 
-	for (i = 0; i < REGISTERS; i++) {
+	fread(&datasetSize, sizeof(int), 1, f);
+	tds = (struct tdataset*) malloc(sizeof(struct tdataset) + datasetSize * sizeof(bool));
+	tds->datasetSize = datasetSize;
+
+	for (i = 0; i < datasetSize; i++) {
 		fread(&tds->dataset[i], sizeof(bool), 1, f);
 	}
 
@@ -206,6 +185,54 @@ int getRegisterLenght(struct theader *t){
 	return length;
 }
 
+void buildHeader() {
+	FILE *f;
+	int hlen, choice, count, fieldsSize, fieldsQuantity, utilSpace, spaceUsed, datasetSize;
+	struct theader *t;
+	bool ffalse = false;
+
+	printf("\n\nLoad a standard header? (0 - Yes | 1 - No)\n");
+	scanf("%d", &choice);
+
+	if (choice == 0) {
+		buildStandardHeader();
+	} else {
+		buildManualHeader();
+	}
+
+	t = readHeader();
+	fieldsSize = getRegisterLenght(t);
+	spaceUsed = (MFIELD * (15 + 1 + sizeof(int))) + sizeof(int);
+	utilSpace = (4096 - spaceUsed);
+	fieldsQuantity = utilSpace / fieldsSize;
+	spaceUsed += (fieldsSize * fieldsQuantity);
+
+	while (true) {
+		datasetSize = fieldsQuantity * sizeof(bool);
+		if ((spaceUsed + datasetSize) <= 4096) {
+			break;
+		}
+		fieldsQuantity--;
+		spaceUsed -= fieldsSize;
+	}
+
+	f = fopen("database", "rb+");
+	if (f == NULL) {
+		printf("File not found\n");
+		exit(0);
+	}
+
+	hlen = MFIELD * (15 + 1 + sizeof(int));
+	fseek(f, hlen, SEEK_SET);
+
+	fwrite(&fieldsQuantity, sizeof(int), 1, f);
+	for (count = 0; count < fieldsQuantity; count++) {
+		fwrite(&ffalse, sizeof(bool), 1, f);
+	}
+
+	fclose(f);
+}
+
 void insert() {
   FILE *f;
 	struct theader *t;
@@ -224,11 +251,11 @@ void insert() {
 		exit(0);
   }
 
-	hlen = (MFIELD * (15 + 1 + sizeof(int))) + (REGISTERS * (sizeof(bool)));
+	hlen = (MFIELD * (15 + 1 + sizeof(int))) + sizeof(int) + (tds->datasetSize * sizeof(bool));
 	fseek(f, hlen, SEEK_SET);
 
 	do {
-		for (; count < REGISTERS; count++) {
+		for (; count < tds->datasetSize; count++) {
 			if (tds->dataset[count] == false) {
 				tds->dataset[count] = true;
 				fseek(f, hlen, SEEK_SET);
@@ -274,10 +301,10 @@ void insert() {
 	  while((c = getchar()) != '\n' && c != EOF); /// garbage collector
 	} while (opt=='S' || opt=='s');
 
-	hlen = (MFIELD * (15 + 1 + sizeof(int)));
+	hlen = (MFIELD * (15 + 1 + sizeof(int))) + sizeof(int);
 	fseek(f, hlen, SEEK_SET);
 
-	for (count = 0; count < REGISTERS; count++) {
+	for (count = 0; count < tds->datasetSize; count++) {
 		fwrite(&tds->dataset[count], sizeof(bool), 1, f);
 	}
 
@@ -313,12 +340,12 @@ void selectAll() {
 
 	printf("\n");
 
-	hlen = (MFIELD * (15 + 1 + sizeof(int))) + (REGISTERS * (sizeof(bool)));
+	hlen = (MFIELD * (15 + 1 + sizeof(int))) + sizeof(int) + (tds->datasetSize * sizeof(bool));
 
 	/// skip file's header
   fseek(f, hlen, SEEK_SET);
 
-  for (count = 0; count < REGISTERS; count++) {
+  for (count = 0; count < tds->datasetSize; count++) {
 		if (tds->dataset[count] == true) {
 			for (i = 0; i < 10 && t[i].name[0] != '#'; i++) {
 			  if (!fread(buf, t[i].len, 1, f)) break;
@@ -374,17 +401,17 @@ void deleteRegister() {
 		printf("\nType the number of the record to be deleted:");
 		scanf("%d", &record);
 
-		if (record > 0 && record <= REGISTERS) {
+		if (record > 0 && record <= tds->datasetSize) {
 			break;
 		}
 	}
 
-	tds->dataset[record-1] = false;
+	tds->dataset[record - 1] = false;
 
-	hlen = (MFIELD * (15 + 1 + sizeof(int)));
+	hlen = (MFIELD * (15 + 1 + sizeof(int))) + sizeof(int);
 	fseek(f, hlen, SEEK_SET);
 
-	for (count = 0; count < REGISTERS; count++) {
+	for (count = 0; count < tds->datasetSize; count++) {
 		fwrite(&tds->dataset[count], sizeof(bool), 1, f);
 	}
 
