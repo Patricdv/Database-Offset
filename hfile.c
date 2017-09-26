@@ -1,3 +1,9 @@
+/********************************************************************************
+	Universidade Federal da Fronteira Sul - 2017.2
+	Banco de Dados 2 - Prof. Guilherme Bianco
+	Alunos: Patric e Duan
+*********************************************************************************/
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
